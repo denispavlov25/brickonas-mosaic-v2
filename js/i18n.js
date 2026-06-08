@@ -136,6 +136,8 @@ const translations = {
         instructions: "Anleitungen",
         generateInstructions: "Farbanleitung PDF erstellen",
         generateInstructionsPDF: "Anleitung PDF erstellen",
+        downloadBuildInstructionsBtn: "Bauanleitung als PDF herunterladen",
+        downloadBuildInstructionsBuilding: "Bauanleitung wird erstellt…",
         generateDepthInstructions: "Tiefenanleitung PDF erstellen",
         generateDepthInstructionsPDF: "Tiefenanleitung PDF erstellen",
         highQuality: "Hohe Qualität",

@@ -1711,6 +1711,16 @@
                       <span>Beim Bestellen wird deine individuelle Bauanleitung vorbereitet. Das kann einen Moment dauern &mdash; bei gr&ouml;&szlig;eren Mosaiks bis zu einer Minute. Bitte schlie&szlig;e die Seite nicht.</span>
                     </div>
 
+                    <!-- Public build-instructions PDF download. Lives inside the result
+                         section (visual-step-3), which is only revealed once a mosaic has
+                         been generated, so it can never be clicked without data. -->
+                    <div class="mosaic-pdf-download" style="margin-top:14px;">
+                      <button type="button" id="public-download-pdf-button" data-i18n="downloadBuildInstructionsBtn"
+                              style="background:#2E7D32;color:#fff;border:0;border-radius:6px;padding:11px 16px;font-weight:600;cursor:pointer;width:100%;">
+                        Bauanleitung als PDF herunterladen
+                      </button>
+                    </div>
+
                     <!-- Admin-only download (revealed by ?admin=... token check in index.js) -->
                     <div class="mosaic-admin-download" id="mosaic-admin-download" hidden style="margin-top:14px;padding:12px;border:1px dashed #2E7D32;border-radius:8px;background:#f1f8f2;">
                       <div style="font-size:12px;color:#2E7D32;font-weight:600;margin-bottom:8px;">Admin-Modus</div>
@@ -1896,10 +1906,10 @@
     <script src="js/bricklink-colors.js?v=1"></script>
     <script src="js/stud-maps.js?v=1"></script>
     <script src="js/heap.js"></script>
-    <script src="js/i18n.js?v=27"></script>
+    <script src="js/i18n.js?v=28"></script>
     <script src="js/algo.js?v=26"></script>
     <script src="js/pdf-vector.js?v=1"></script>
-    <script src="js/index.js?v=44"></script>
+    <script src="js/index.js?v=45"></script>
 
     <script>
       // Notify parent iframe of height changes for dynamic resizing

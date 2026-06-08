@@ -2826,6 +2826,29 @@ document.getElementById("download-instructions-button").addEventListener("click"
     await generateInstructions();
 });
 
+// Public build-instructions PDF download. The button lives inside the result
+// section (visual-step-3), which is only un-hidden after a mosaic is generated,
+// so by the time it is visible the in-memory pixel data exists. generateInstructions()
+// re-runs runStep4() to (re)build the pixel arrays and then saves the PDF via jsPDF.
+(function initPublicPdfDownload() {
+    var btn = document.getElementById("public-download-pdf-button");
+    if (!btn) return;
+    btn.addEventListener("click", async function () {
+        var orig = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = t("downloadBuildInstructionsBuilding");
+        try {
+            await generateInstructions();
+        } catch (err) {
+            console.error("Build-instructions PDF download failed:", err);
+            alert("PDF-Erstellung fehlgeschlagen. Bitte versuche es erneut.");
+        } finally {
+            btn.disabled = false;
+            btn.textContent = orig;
+        }
+    });
+})();
+
 // Admin-only PDF download: revealed when URL contains ?admin=<token>.
 // Lets Denis grab the build-instructions PDF without going through checkout
 // (e.g. for live demos at events). Token is intentionally a shared secret —

@@ -2,7 +2,7 @@
 
 A standalone web app that lets users turn any photo into a LEGO®-compatible brick mosaic, with live preview, color matching, and printable build instructions. Used in production at [brickonas.info/mosaik/](https://brickonas.info/mosaik/).
 
-> **This is the v2 repository.** It is an independent, clean-history fork used for the BRICKONAS frontend rebuild. The original repo (`brickonas-mosaic`) is left untouched. Deep optimizations (vector PDF via jsPDF 2.x / pdf-lib, depth-map Web Worker) are planned here and tracked separately.
+> **This is the v2 repository.** It is an independent, clean-history fork used for the BRICKONAS frontend rebuild. The original repo (`brickonas-mosaic`) is left untouched. The build-instructions PDF is now generated as a lightweight **vector** document (jsPDF 2.x, self-contained in `js/jspdf.umd.min.js`, rendered by `js/pdf-vector.js`) instead of embedded raster pages.
 
 ## Attribution
 
@@ -21,7 +21,9 @@ This fork adapts the original tool for the BRICKONAS brand and the German market
 - **Standalone deployment** as a self-contained static site (no build step), embedded in the WordPress site at `brickonas.info/mosaik/`
 - **Minor UI/UX adjustments** for integration with the parent site's design system
 
-The core algorithm, color science, depth-map worker, and instruction-generation logic are unchanged.
+- **Vector build-instructions PDF** (`js/pdf-vector.js`): stud grids, per-stud numbers, the colour legend (with per-colour counts and totals), the plate-arrangement overview and detail-block pages are drawn with native jsPDF vector primitives. Output is crisp at any print size and an order of magnitude smaller than the previous raster pages.
+
+The core algorithm, color science, and depth-map logic are unchanged.
 
 ## License
 

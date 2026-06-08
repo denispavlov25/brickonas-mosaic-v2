@@ -2525,157 +2525,34 @@ async function generateInstructionsAsBlob() {
 }
 
 async function _generateBlobFromStep4() {
-    const instructionsCanvasContainer = document.getElementById("instructions-canvas-container");
-
-    // Always upload in high quality — this is the printable copy delivered with the kit.
-    const isHighQuality = true;
     const step4PixelArray = getPixelArrayFromCanvas(step4Canvas);
     const resultImage = isBleedthroughEnabled()
         ? revertDarkenedImage(step4PixelArray, getDarkenedStudsToStuds(ALL_BRICKLINK_SOLID_COLORS.map((c) => c.hex)))
         : step4PixelArray;
 
-    const titlePageCanvas = document.createElement("canvas");
-    instructionsCanvasContainer.appendChild(titlePageCanvas);
     const studMap = getUsedPixelsStudMap(resultImage);
     const filteredAvailableStudHexList = selectedSortedStuds
         .filter((h) => (studMap[h] || 0) > 0)
         .filter((item, pos, self) => self.indexOf(item) === pos);
 
-    // Use a higher scaling factor for the title page so it's sharp even for large mosaics.
-    // The global SCALING_FACTOR is capped to keep on-screen canvases ≤4096px (mobile).
-    // For PDF-only the canvas can be larger; we use min 25, max 40.
-    const TITLE_SCALING = Math.max(25, Math.min(40, BASE_SCALING_FACTOR));
-    generateInstructionTitlePage(resultImage, targetResolution[0], PLATE_WIDTH, PLATE_HEIGHT,
-        filteredAvailableStudHexList, TITLE_SCALING, step4CanvasUpscaled, titlePageCanvas,
-        selectedPixelPartNumber, PIXEL_WIDTH_CM);
-    setDPI(titlePageCanvas, isHighQuality ? HIGH_DPI : LOW_DPI);
-
-    // Adaptive JPEG quality based on mosaic size:
-    // - Small mosaics (≤96): use 0.96 — file is small anyway, prioritize quality
-    // - Medium (≤192): 0.92 — balanced
-    // - Large (≥192): 0.88 — needed to stay under 120 MB upload limit
-    // The title page (overview) gets higher quality since that's what you see at-a-glance.
-    const totalNoppen = targetResolution[0] * targetResolution[1];
-    const JPEG_QUALITY_PAGES = totalNoppen <= 96 * 96 ? 0.96
-                             : totalNoppen <= 192 * 192 ? 0.92
-                             : 0.88;
-    const JPEG_QUALITY_TITLE = totalNoppen <= 96 * 96 ? 0.97
-                             : totalNoppen <= 192 * 192 ? 0.95
-                             : 0.93; // title gets a quality bonus — it's the showpiece
-    // Enforce a minimum page size so large mosaics don't get tiny pages.
-    // A4 is 210x297mm, A3 is 297x420mm. We use 1000x1000mm (1m square) so
-    // print quality stays high for any mosaic size — instructions are clearly
-    // readable when printed.
-    const MIN_PAGE_W = 1000;
-    const MIN_PAGE_H = 1000;
-    // Always at least 1m × 1m — never use the canvas size if it's smaller.
-    const pageW = Math.max(titlePageCanvas.width, MIN_PAGE_W);
-    const pageH = Math.max(titlePageCanvas.height, MIN_PAGE_H);
-    const imgData = titlePageCanvas.toDataURL("image/jpeg", JPEG_QUALITY_TITLE);
-    let pdf = new jsPDF({
-        orientation: pageW < pageH ? "p" : "l",
-        unit: "mm",
-        format: [pageW, pageH],
+    // Vector PDF — same builder as the download path. Produces the printable
+    // copy delivered with the kit: crisp at any size and small enough to upload.
+    const pdf = await BkVectorPdf.buildInstructionsPdf({
+        resultImage,
+        targetResolution,
+        PLATE_WIDTH,
+        PLATE_HEIGHT,
+        availableStudHexList: filteredAvailableStudHexList,
+        pixelType: selectedPixelPartNumber,
+        pixelWidthCm: PIXEL_WIDTH_CM,
+        variablePixelPieceDimensions: step3VariablePixelPieceDimensions,
+        blockSize: 16,
+        getSubPixelArray,
+        getSubBlockFromPlate,
+        getSubPixelMatrix,
+        sleep,
     });
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = pdf.internal.pageSize.getHeight();
-    const totalPlates = resultImage.length / (4 * PLATE_WIDTH * PLATE_WIDTH);
-    // Center the title image on the page if image is smaller than page
-    const titleImgRatio = titlePageCanvas.width / titlePageCanvas.height;
-    let titleW = pdfWidth;
-    let titleH = pdfWidth / titleImgRatio;
-    if (titleH > pdfHeight) {
-        titleH = pdfHeight;
-        titleW = pdfHeight * titleImgRatio;
-    }
-    const titleX = (pdfWidth - titleW) / 2;
-    const titleY = (pdfHeight - titleH) / 2;
-    pdf.addImage(imgData, "JPEG", titleX, titleY, titleW, titleH);
-    titlePageCanvas.remove();
-
-    // For instruction pages, force max scaling factor regardless of mosaic size.
-    // Each plate page is only 16x16 studs, so canvas is 16*40=640px max — safe on mobile.
-    // This ensures plate pages are sharp even for large mosaics where global SCALING_FACTOR drops.
-    const PRINT_SCALING = 40;
-    // Detail-block size: split each plate into BLOCK_SIZE × BLOCK_SIZE sub-pages
-    // so each readable build step matches one 16×16 stud area (≈ one mini-baseplate).
-    // Only applied when the plate is a multiple of BLOCK_SIZE; otherwise we keep
-    // a single plate page (small plates like 16×16 are already readable).
-    const BLOCK_SIZE = 16;
-    const helper = drawPdfInstructionPage;
-    for (var i = 0; i < totalPlates; i++) {
-        await sleep(10);
-        pdf.addPage();
-        const subPixelArray = getSubPixelArray(resultImage, i, targetResolution[0], PLATE_WIDTH);
-        const row = Math.floor((i * PLATE_WIDTH) / targetResolution[0]);
-        const col = i % (targetResolution[0] / PLATE_WIDTH);
-        const variablePixelPieceDimensionsForPage = step3VariablePixelPieceDimensions == null
-            ? null
-            : getSubPixelMatrix(step3VariablePixelPieceDimensions, col * PLATE_WIDTH, row * PLATE_WIDTH, PLATE_WIDTH, PLATE_WIDTH);
-
-        // Plate overview page (full PLATE_WIDTH × PLATE_WIDTH) — keeps customer orientation.
-        await helper(pdf, subPixelArray, PLATE_WIDTH, filteredAvailableStudHexList, PRINT_SCALING,
-            i + 1, selectedPixelPartNumber, variablePixelPieceDimensionsForPage,
-            pdfWidth, pdfHeight, isHighQuality, JPEG_QUALITY_PAGES);
-
-        // Detail sub-pages: split the plate into BLOCK_SIZE × BLOCK_SIZE blocks.
-        const blocksPerSide = PLATE_WIDTH / BLOCK_SIZE;
-        if (blocksPerSide > 1 && Number.isInteger(blocksPerSide)) {
-            let blockIdx = 0;
-            for (let br = 0; br < blocksPerSide; br++) {
-                for (let bc = 0; bc < blocksPerSide; bc++) {
-                    blockIdx++;
-                    await sleep(10);
-                    pdf.addPage();
-                    const blockArray = getSubBlockFromPlate(subPixelArray, PLATE_WIDTH, bc, br, BLOCK_SIZE);
-                    const blockVariableDims = variablePixelPieceDimensionsForPage == null
-                        ? null
-                        : getSubPixelMatrix(variablePixelPieceDimensionsForPage, bc * BLOCK_SIZE, br * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-                    const blockLabel = `${i + 1}.${blockIdx}`;
-                    const overviewContext = {
-                        fullPlateArray: subPixelArray,
-                        plateWidth: PLATE_WIDTH,
-                        blockCol: bc,
-                        blockRow: br,
-                        blockSize: BLOCK_SIZE,
-                    };
-                    // Scale up so the detail canvas matches the plate canvas size
-                    // (otherwise jsPDF stretches the smaller canvas across the same
-                    // page and the studs end up looking 3× too big).
-                    const detailScaling = PRINT_SCALING * (PLATE_WIDTH / BLOCK_SIZE);
-                    // But keep the legend at the plate scale so it doesn't grow 3×.
-                    await helper(pdf, blockArray, BLOCK_SIZE, filteredAvailableStudHexList, detailScaling,
-                        blockLabel, selectedPixelPartNumber, blockVariableDims,
-                        pdfWidth, pdfHeight, isHighQuality, JPEG_QUALITY_PAGES, overviewContext, PRINT_SCALING);
-                }
-            }
-        }
-    }
-    addWaterMark(pdf, isHighQuality);
     return pdf.output("blob");
-}
-
-// Render one instruction page (plate overview or detail block) into the PDF.
-async function drawPdfInstructionPage(pdf, pixelArray, plateWidth, availableStudHexList, scaling,
-                                       label, pixelType, variableDims,
-                                       pdfWidth, pdfHeight, isHighQuality, jpegQuality, overviewContext, legendScalingOverride) {
-    const canvas = document.createElement("canvas");
-    generateInstructionPage(pixelArray, plateWidth, availableStudHexList, scaling,
-        canvas, label, pixelType, variableDims, overviewContext, legendScalingOverride);
-    setDPI(canvas, isHighQuality ? HIGH_DPI : LOW_DPI);
-    const imgData = canvas.toDataURL("image/jpeg", jpegQuality);
-    const ratio = canvas.width / canvas.height;
-    let drawW = pdfWidth;
-    let drawH = pdfWidth / ratio;
-    if (drawH > pdfHeight) {
-        drawH = pdfHeight;
-        drawW = pdfHeight * ratio;
-    }
-    const drawX = (pdfWidth - drawW) / 2;
-    const drawY = (pdfHeight - drawH) / 2;
-    pdf.addImage(imgData, "JPEG", drawX, drawY, drawW, drawH);
-    canvas.width = 0;
-    canvas.height = 0;
 }
 
 // Upload PDF blob to WordPress, returns token on success, or null on failure.
@@ -2719,8 +2596,7 @@ async function generateInstructions() {
         try {
             // Update plate dimensions based on current step selector values
             updatePlateDimensions();
-            
-            const isHighQuality = document.getElementById("high-quality-instructions-check").checked;
+
             const step4PixelArray = getPixelArrayFromCanvas(step4Canvas);
             const resultImage = isBleedthroughEnabled()
                 ? revertDarkenedImage(
@@ -2729,179 +2605,40 @@ async function generateInstructions() {
                   )
                 : step4PixelArray;
 
-            const titlePageCanvas = document.createElement("canvas");
-            instructionsCanvasContainer.appendChild(titlePageCanvas);
             const studMap = getUsedPixelsStudMap(resultImage);
             const filteredAvailableStudHexList = selectedSortedStuds
                 .filter((pixelHex) => (studMap[pixelHex] || 0) > 0)
                 .filter(function (item, pos, self) {
                     return self.indexOf(item) === pos; // remove duplicates
                 });
-            generateInstructionTitlePage(
-                resultImage,
-                targetResolution[0],
-                PLATE_WIDTH,
-                PLATE_HEIGHT,
-                filteredAvailableStudHexList,
-                SCALING_FACTOR,
-                step4CanvasUpscaled,
-                titlePageCanvas,
-                selectedPixelPartNumber,
-                PIXEL_WIDTH_CM
-            );
-            setDPI(titlePageCanvas, isHighQuality ? HIGH_DPI : LOW_DPI);
-
-        // JPEG instead of PNG: cuts PDF size ~20× for instruction pages.
-        // Quality tuned to match the customer-order path (_generateBlobFromStep4).
-        const totalNoppen = targetResolution[0] * targetResolution[1];
-        const JPEG_QUALITY_PAGES = totalNoppen <= 96 * 96 ? 0.96
-                                 : totalNoppen <= 192 * 192 ? 0.92
-                                 : 0.88;
-        const JPEG_QUALITY_TITLE = totalNoppen <= 96 * 96 ? 0.97
-                                 : totalNoppen <= 192 * 192 ? 0.95
-                                 : 0.93;
-        const imgData = titlePageCanvas.toDataURL("image/jpeg", JPEG_QUALITY_TITLE);
-
-        let pdf = new jsPDF({
-            orientation: titlePageCanvas.width < titlePageCanvas.height ? "p" : "l",
-            unit: "mm",
-            format: [titlePageCanvas.width, titlePageCanvas.height],
-        });
-
-        const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = pdf.internal.pageSize.getHeight();
-
-        const totalPlates = resultImage.length / (4 * PLATE_WIDTH * PLATE_WIDTH);
-
-        document.getElementById("pdf-progress-bar").style.width = `${100 / (totalPlates + 1)}%`;
 
         document.getElementById("pdf-progress-bar").style.width = "0%";
         document.getElementById("pdf-progress-container").hidden = false;
         document.getElementById("download-instructions-button").hidden = true;
 
-        pdf.addImage(imgData, "JPEG", 0, 0, pdfWidth, (pdfWidth * titlePageCanvas.height) / titlePageCanvas.width);
+        // Vector PDF: stud grids, numbers and the colour legend are drawn with
+        // native jsPDF primitives instead of embedding rasterised canvases.
+        // This keeps the content identical but produces a much smaller, crisp file.
+        const pdf = await BkVectorPdf.buildInstructionsPdf({
+            resultImage,
+            targetResolution,
+            PLATE_WIDTH,
+            PLATE_HEIGHT,
+            availableStudHexList: filteredAvailableStudHexList,
+            pixelType: selectedPixelPartNumber,
+            pixelWidthCm: PIXEL_WIDTH_CM,
+            variablePixelPieceDimensions: step3VariablePixelPieceDimensions,
+            blockSize: 16,
+            getSubPixelArray,
+            getSubBlockFromPlate,
+            getSubPixelMatrix,
+            sleep,
+            onProgress: (frac) => {
+                document.getElementById("pdf-progress-bar").style.width = `${Math.round(frac * 100)}%`;
+            },
+        });
 
-        // Remove title page canvas from DOM to free memory
-        titlePageCanvas.remove();
-
-        // Render one page (plate overview or 16x16 detail) into the current pdf.
-        // overviewContext (optional): { fullPlateArray, plateWidth, blockCol, blockRow, blockSize }
-        // triggers a small thumbnail with the current block highlighted.
-        const renderPageToPdf = (pixelArrayForPage, plateWidthForPage, label, variableDims, overviewContext, scalingOverride, legendScalingOverride) => {
-            const instructionPageCanvas = document.createElement("canvas");
-            generateInstructionPage(
-                pixelArrayForPage,
-                plateWidthForPage,
-                filteredAvailableStudHexList,
-                scalingOverride || SCALING_FACTOR,
-                instructionPageCanvas,
-                label,
-                selectedPixelPartNumber,
-                variableDims,
-                overviewContext,
-                legendScalingOverride
-            );
-            setDPI(instructionPageCanvas, isHighQuality ? HIGH_DPI : LOW_DPI);
-            const pageImgData = instructionPageCanvas.toDataURL("image/jpeg", JPEG_QUALITY_PAGES);
-            pdf.addImage(
-                pageImgData,
-                "JPEG",
-                0,
-                0,
-                pdfWidth,
-                (pdfWidth * instructionPageCanvas.height) / instructionPageCanvas.width
-            );
-            instructionPageCanvas.width = 0;
-            instructionPageCanvas.height = 0;
-        };
-
-        // Detail-block size: split each plate into BLOCK_SIZE × BLOCK_SIZE sub-pages
-        // so each readable build step matches one 16×16 stud area. Only when the
-        // plate is a clean multiple of BLOCK_SIZE (small plates stay single-page).
-        const BLOCK_SIZE = 16;
-
-        // Build a flat list of pages so the multi-part splitter (every N pages)
-        // works the same way as before, regardless of how many sub-pages we add.
-        const pageJobs = [];
-        for (var i = 0; i < totalPlates; i++) {
-            const subPixelArray = getSubPixelArray(resultImage, i, targetResolution[0], PLATE_WIDTH);
-            const row = Math.floor((i * PLATE_WIDTH) / targetResolution[0]);
-            const col = i % (targetResolution[0] / PLATE_WIDTH);
-            const variablePixelPieceDimensionsForPage =
-                step3VariablePixelPieceDimensions == null
-                    ? null
-                    : getSubPixelMatrix(
-                          step3VariablePixelPieceDimensions,
-                          col * PLATE_WIDTH,
-                          row * PLATE_WIDTH,
-                          PLATE_WIDTH,
-                          PLATE_WIDTH
-                      );
-            // Plate overview
-            pageJobs.push({
-                pixels: subPixelArray,
-                width: PLATE_WIDTH,
-                label: i + 1,
-                variableDims: variablePixelPieceDimensionsForPage,
-            });
-            // Detail sub-pages (only if plate cleanly divides into 16×16 blocks)
-            const blocksPerSide = PLATE_WIDTH / BLOCK_SIZE;
-            if (blocksPerSide > 1 && Number.isInteger(blocksPerSide)) {
-                let blockIdx = 0;
-                for (let br = 0; br < blocksPerSide; br++) {
-                    for (let bc = 0; bc < blocksPerSide; bc++) {
-                        blockIdx++;
-                        const blockArray = getSubBlockFromPlate(subPixelArray, PLATE_WIDTH, bc, br, BLOCK_SIZE);
-                        const blockVariableDims = variablePixelPieceDimensionsForPage == null
-                            ? null
-                            : getSubPixelMatrix(variablePixelPieceDimensionsForPage, bc * BLOCK_SIZE, br * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-                        pageJobs.push({
-                            pixels: blockArray,
-                            width: BLOCK_SIZE,
-                            label: `${i + 1}.${blockIdx}`,
-                            variableDims: blockVariableDims,
-                            // Match plate canvas size: detail block × 3 ≈ plate × 1 (at 48/16)
-                            scalingOverride: SCALING_FACTOR * (PLATE_WIDTH / BLOCK_SIZE),
-                            // Keep the legend at the plate scale (smaller) instead of growing 3×.
-                            legendScalingOverride: SCALING_FACTOR,
-                            overviewContext: {
-                                fullPlateArray: subPixelArray,
-                                plateWidth: PLATE_WIDTH,
-                                blockCol: bc,
-                                blockRow: br,
-                                blockSize: BLOCK_SIZE,
-                            },
-                        });
-                    }
-                }
-            }
-        }
-
-        let numParts = 1;
-        for (var p = 0; p < pageJobs.length; p++) {
-            await sleep(10);
-
-            if ((p + 1) % (isHighQuality ? 20 : 50) === 0) {
-                addWaterMark(pdf, isHighQuality);
-                pdf.save(`${t('pdfFilename')}-${t('pdfInstructions')}-${t('pdfPart')}-${numParts}.pdf`);
-                numParts++;
-                pdf = new jsPDF({
-                    orientation: titlePageCanvas.width < titlePageCanvas.height ? "p" : "l",
-                    unit: "mm",
-                    format: [titlePageCanvas.width, titlePageCanvas.height],
-                });
-            } else {
-                pdf.addPage();
-            }
-
-            document.getElementById("pdf-progress-bar").style.width = `${((p + 2) * 100) / (pageJobs.length + 1)}%`;
-
-            const job = pageJobs[p];
-            renderPageToPdf(job.pixels, job.width, job.label, job.variableDims, job.overviewContext, job.scalingOverride, job.legendScalingOverride);
-        }
-
-        addWaterMark(pdf, isHighQuality);
-        pdf.save(numParts > 1 ? `${t('pdfFilename')}-${t('pdfInstructions')}-${t('pdfPart')}-${numParts}.pdf` : `${t('pdfFilename')}-${t('pdfInstructions')}.pdf`);
+        pdf.save(`${t('pdfFilename')}-${t('pdfInstructions')}.pdf`);
         document.getElementById("pdf-progress-container").hidden = true;
         document.getElementById("download-instructions-button").hidden = false;
         enableInteraction();
